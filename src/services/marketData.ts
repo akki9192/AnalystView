@@ -30,7 +30,7 @@ interface DataProvider {
  * Uses unofficial Yahoo Finance API
  */
 class YahooFinanceProvider implements DataProvider {
-  private baseUrl = 'https://query1.finance.yahoo.com/v8/finance/chart';
+  private baseUrl = '/api/yahoo/v8/finance/chart';
 
   /**
    * Convert Timeframe enum to Yahoo Finance interval string

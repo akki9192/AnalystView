@@ -269,19 +269,31 @@ export const Chart: React.FC<ChartProps> = ({ width, height }) => {
   /**
    * Handle mouse wheel (zoom)
    */
-  const handleWheel = useCallback(
-    (e: React.WheelEvent<HTMLCanvasElement>) => {
-      e.preventDefault();
 
+
+  /**
+   * Attach wheel listener manually to support non-passive events
+   */
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
       const zoomFactor = 1.1;
       const delta = e.deltaY > 0 ? 1 / zoomFactor : zoomFactor;
 
       updateTransform({
         scale: transform.scale * delta,
       });
-    },
-    [transform, updateTransform]
-  );
+    };
+
+    canvas.addEventListener('wheel', onWheel, { passive: false });
+
+    return () => {
+      canvas.removeEventListener('wheel', onWheel);
+    };
+  }, [transform, updateTransform]);
 
   /**
    * Handle mouse drag (pan)
@@ -339,7 +351,6 @@ export const Chart: React.FC<ChartProps> = ({ width, height }) => {
         className="chart-canvas w-full h-full"
         onMouseMove={handleMouseMoveWhileDragging}
         onMouseLeave={handleMouseLeave}
-        onWheel={handleWheel}
         onMouseDown={handleMouseDown}
         onMouseUp={handleMouseUp}
       />
