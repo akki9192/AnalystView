@@ -5,3 +5,4 @@ export { GannAnglesRenderer } from './GannAnglesRenderer';
 export { TrendLineRenderer } from './TrendLineRenderer';
 export { HorizontalLineRenderer } from './HorizontalLineRenderer';
 export { VerticalLineRenderer } from './VerticalLineRenderer';
+export { FibonacciRetracementRenderer } from './FibonacciRetracementRenderer';

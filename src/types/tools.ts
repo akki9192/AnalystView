@@ -138,6 +138,28 @@ export interface GannFan extends BaseTool {
 }
 
 /**
+ * Fibonacci level configuration
+ */
+export interface FibonacciLevel {
+  ratio: number; // 0.236, 0.382, 0.5, 0.618, 0.786, etc.
+  enabled: boolean;
+  style: DrawingStyle;
+  label?: string;
+}
+
+/**
+ * Fibonacci retracement tool
+ * Draws horizontal levels based on Fibonacci ratios
+ */
+export interface FibonacciRetracement extends BaseTool {
+  type: 'fibonacci_retracement';
+  points: [ChartPoint, ChartPoint]; // Start (swing low/high) and end (swing high/low)
+  levels: FibonacciLevel[];
+  showLabels: boolean;
+  extendLines: boolean;
+}
+
+/**
  * Union type of all drawing tools
  */
 export type DrawingTool =
@@ -145,7 +167,8 @@ export type DrawingTool =
   | HorizontalLine
   | VerticalLine
   | GannAngles
-  | GannFan;
+  | GannFan
+  | FibonacciRetracement;
 
 /**
  * Tool interaction state

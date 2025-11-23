@@ -21,6 +21,7 @@ const TOOLS: ToolButton[] = [
   { type: ToolType.HORIZONTAL_LINE, label: 'Horizontal', icon: '─' },
   { type: ToolType.VERTICAL_LINE, label: 'Vertical', icon: '│' },
   { type: ToolType.GANN_ANGLES, label: 'Gann Angles', icon: '⦨' },
+  { type: ToolType.FIBONACCI_RETRACEMENT, label: 'Fibonacci', icon: 'φ' },
 ];
 
 export const Toolbar: React.FC = () => {

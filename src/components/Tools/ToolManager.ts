@@ -8,6 +8,7 @@ import { GannAnglesRenderer } from './GannAnglesRenderer';
 import { TrendLineRenderer } from './TrendLineRenderer';
 import { HorizontalLineRenderer } from './HorizontalLineRenderer';
 import { VerticalLineRenderer } from './VerticalLineRenderer';
+import { FibonacciRetracementRenderer } from './FibonacciRetracementRenderer';
 import type { DrawingTool, CoordinateMapper, CanvasPoint } from '../../types';
 
 export class ToolManager {
@@ -21,6 +22,7 @@ export class ToolManager {
     this.renderers.set('trendline', new TrendLineRenderer(ctx));
     this.renderers.set('horizontal_line', new HorizontalLineRenderer(ctx));
     this.renderers.set('vertical_line', new VerticalLineRenderer(ctx));
+    this.renderers.set('fibonacci_retracement', new FibonacciRetracementRenderer(ctx));
   }
 
   /**

@@ -581,8 +581,8 @@ export const Chart: React.FC<ChartProps> = ({ width, height }) => {
 
     // Handle tool interactions for drawing tools
     if (activeTool !== ToolType.NONE && activeTool !== ToolType.CURSOR) {
-      // TRENDLINE requires two clicks (start and end points)
-      if (activeTool === ToolType.TRENDLINE) {
+      // Two-click tools (TRENDLINE, FIBONACCI)
+      if (activeTool === ToolType.TRENDLINE || activeTool === ToolType.FIBONACCI_RETRACEMENT) {
         if (!toolInteraction.isDrawing) {
           // First click - start drawing
           setIsDrawing(true);
@@ -591,9 +591,16 @@ export const Chart: React.FC<ChartProps> = ({ width, height }) => {
         } else {
           // Second click - finish drawing
           const startPoint = toolInteraction.tempPoints[0];
-          const newTool = ToolFactory.createTrendLine(startPoint, chartPoint);
-          addTool(newTool);
-          setSelectedTool(newTool.id);
+          let newTool;
+          if (activeTool === ToolType.TRENDLINE) {
+            newTool = ToolFactory.createTrendLine(startPoint, chartPoint);
+          } else if (activeTool === ToolType.FIBONACCI_RETRACEMENT) {
+            newTool = ToolFactory.createFibonacciRetracement(startPoint, chartPoint);
+          }
+          if (newTool) {
+            addTool(newTool);
+            setSelectedTool(newTool.id);
+          }
           setIsDrawing(false);
           updateTempPoints([]);
           setActiveTool(ToolType.CURSOR);

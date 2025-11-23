@@ -39,6 +39,8 @@ export type {
   GannAngle,
   GannAngles,
   GannFan,
+  FibonacciLevel,
+  FibonacciRetracement,
   DrawingTool,
   ToolInteraction,
 } from './tools';
