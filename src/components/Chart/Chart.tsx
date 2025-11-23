@@ -12,6 +12,7 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { ChartRenderer } from './ChartRenderer';
 import { ToolManager, ToolFactory } from '../Tools';
+import { ToolPropertiesPanel } from '../UI';
 import {
   useMarketData,
   useChartSettings,
@@ -526,6 +527,16 @@ export const Chart: React.FC<ChartProps> = ({ width, height }) => {
           setActiveTool(ToolType.CURSOR);
           setSelectedTool(null);
           break;
+        case 'Delete':
+        case 'Backspace':
+          e.preventDefault();
+          // Delete selected tool
+          if (selectedTool) {
+            const deleteTool = useStore.getState().deleteTool;
+            deleteTool(selectedTool);
+            setSelectedTool(null);
+          }
+          break;
       }
     };
 
@@ -534,7 +545,7 @@ export const Chart: React.FC<ChartProps> = ({ width, height }) => {
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [zoom, resetView, autoScale, toolInteraction, setIsDrawing, updateTempPoints, setActiveTool, setSelectedTool]);
+  }, [zoom, resetView, autoScale, toolInteraction, selectedTool, setIsDrawing, updateTempPoints, setActiveTool, setSelectedTool]);
 
   /**
    * Handle mouse drag (pan)
@@ -696,6 +707,9 @@ export const Chart: React.FC<ChartProps> = ({ width, height }) => {
       ref={containerRef}
       className="relative w-full h-full bg-white dark:bg-gray-900"
     >
+      {/* Tool Properties Panel */}
+      <ToolPropertiesPanel />
+
       {/* Chart Controls */}
       {marketData && (
         <div className="absolute top-2 right-2 z-10 flex gap-1 bg-white dark:bg-gray-800 rounded shadow-md border border-gray-200 dark:border-gray-700 p-1">
