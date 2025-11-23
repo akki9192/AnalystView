@@ -1,0 +1,45 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    line-height: 1.5;
+    font-weight: 400;
+    font-synthesis: none;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    margin: 0;
+    min-width: 320px;
+    min-height: 100vh;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+}
+
+@layer components {
+  /* Custom component styles will go here */
+  .chart-canvas {
+    cursor: crosshair;
+    touch-action: none;
+  }
+
+  .tool-button {
+    @apply px-3 py-2 rounded hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors;
+  }
+
+  .tool-button-active {
+    @apply bg-blue-500 text-white hover:bg-blue-600 dark:hover:bg-blue-600;
+  }
+
+  .panel-section {
+    @apply bg-white dark:bg-gray-800 rounded-lg shadow-md p-4 border border-gray-200 dark:border-gray-700;
+  }
+}
