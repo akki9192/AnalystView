@@ -22,6 +22,7 @@ import {
   useTools,
   useActiveTool,
   useSelectedTool,
+  useToolInteraction,
 } from '../../stores/useStore';
 import {
   createCoordinateMapper,
@@ -55,9 +56,13 @@ export const Chart: React.FC<ChartProps> = ({ width, height }) => {
   const tools = useTools();
   const activeTool = useActiveTool();
   const selectedTool = useSelectedTool();
+  const toolInteraction = useToolInteraction();
   const addTool = useStore((state) => state.addTool);
+  const updateTool = useStore((state) => state.updateTool);
   const setActiveTool = useStore((state) => state.setActiveTool);
   const setSelectedTool = useStore((state) => state.setSelectedTool);
+  const setIsDrawing = useStore((state) => state.setIsDrawing);
+  const updateTempPoints = useStore((state) => state.updateTempPoints);
 
   // Constants for zoom limits
   const MIN_CANDLES_VISIBLE = 10;
@@ -268,6 +273,31 @@ export const Chart: React.FC<ChartProps> = ({ width, height }) => {
       toolManager.renderTools(tools, mapper, selectedTool || null);
     }
 
+    // Draw temporary tool being created (e.g., trendline in progress)
+    if (toolInteraction.isDrawing && toolInteraction.tempPoints.length > 0 && crosshair) {
+      const canvas = canvasRef.current;
+      const ctx = canvas?.getContext('2d');
+      if (ctx) {
+        const startPoint = toolInteraction.tempPoints[0];
+        const startCanvas = mapper.chartToCanvas(startPoint);
+
+        ctx.strokeStyle = '#3b82f6';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([5, 5]);
+        ctx.beginPath();
+        ctx.moveTo(startCanvas.x, startCanvas.y);
+        ctx.lineTo(crosshair.x, crosshair.y);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Draw start point
+        ctx.fillStyle = '#3b82f6';
+        ctx.beginPath();
+        ctx.arc(startCanvas.x, startCanvas.y, 4, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
     // Draw crosshair
     if (crosshair) {
       renderer.drawCrosshair(
@@ -299,6 +329,7 @@ export const Chart: React.FC<ChartProps> = ({ width, height }) => {
     hoveredCandleIndex,
     tools,
     selectedTool,
+    toolInteraction,
     getDimensions,
   ]);
 
@@ -485,6 +516,16 @@ export const Chart: React.FC<ChartProps> = ({ width, height }) => {
           e.preventDefault();
           autoScale();
           break;
+        case 'Escape':
+          e.preventDefault();
+          // Cancel drawing mode and reset to cursor
+          if (toolInteraction.isDrawing) {
+            setIsDrawing(false);
+            updateTempPoints([]);
+          }
+          setActiveTool(ToolType.CURSOR);
+          setSelectedTool(null);
+          break;
       }
     };
 
@@ -493,7 +534,7 @@ export const Chart: React.FC<ChartProps> = ({ width, height }) => {
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [zoom, resetView, autoScale]);
+  }, [zoom, resetView, autoScale, toolInteraction, setIsDrawing, updateTempPoints, setActiveTool, setSelectedTool]);
 
   /**
    * Handle mouse drag (pan)
@@ -518,22 +559,44 @@ export const Chart: React.FC<ChartProps> = ({ width, height }) => {
       settings
     );
 
-    // Handle tool interactions
-    if (activeTool !== ToolType.NONE && activeTool !== ToolType.CURSOR) {
-      // Place a new tool
-      const price = mapper.yToPrice(y);
-      const timestamp = mapper.xToTime(x);
-      const chartPoint: ChartPoint = { price, timestamp };
+    const price = mapper.yToPrice(y);
+    const timestamp = mapper.xToTime(x);
+    const chartPoint: ChartPoint = { price, timestamp };
 
-      // Create tool based on active tool type
+    // Handle CROSSHAIR - just for viewing, no tool placement
+    if (activeTool === ToolType.CROSSHAIR) {
+      return; // Crosshair is just a view mode
+    }
+
+    // Handle tool interactions for drawing tools
+    if (activeTool !== ToolType.NONE && activeTool !== ToolType.CURSOR) {
+      // TRENDLINE requires two clicks (start and end points)
+      if (activeTool === ToolType.TRENDLINE) {
+        if (!toolInteraction.isDrawing) {
+          // First click - start drawing
+          setIsDrawing(true);
+          updateTempPoints([chartPoint]);
+          return;
+        } else {
+          // Second click - finish drawing
+          const startPoint = toolInteraction.tempPoints[0];
+          const newTool = ToolFactory.createTrendLine(startPoint, chartPoint);
+          addTool(newTool);
+          setSelectedTool(newTool.id);
+          setIsDrawing(false);
+          updateTempPoints([]);
+          setActiveTool(ToolType.CURSOR);
+          return;
+        }
+      }
+
+      // Single-click tools (Gann angles, horizontal/vertical lines)
       let newTool;
       if (activeTool === ToolType.GANN_ANGLES) {
         // Calculate price scale for Gann angles
         const priceRange = range.priceRange.max - range.priceRange.min;
         const priceScale = priceRange / dimensions.priceChartHeight;
         newTool = ToolFactory.createGannAngles(chartPoint, 'up', priceScale);
-      } else if (activeTool === ToolType.TRENDLINE) {
-        newTool = ToolFactory.createTrendLine(chartPoint, chartPoint);
       } else if (activeTool === ToolType.HORIZONTAL_LINE) {
         newTool = ToolFactory.createHorizontalLine(price, timestamp);
       } else if (activeTool === ToolType.VERTICAL_LINE) {
@@ -543,8 +606,8 @@ export const Chart: React.FC<ChartProps> = ({ width, height }) => {
       if (newTool) {
         addTool(newTool);
         setSelectedTool(newTool.id);
-        // Reset to cursor after placing tool
-        setActiveTool(ToolType.CURSOR);
+        // Don't reset to cursor - let user place multiple tools
+        // setActiveTool(ToolType.CURSOR);
       }
       return;
     }
@@ -573,14 +636,18 @@ export const Chart: React.FC<ChartProps> = ({ width, height }) => {
     marketData,
     range,
     activeTool,
+    toolInteraction,
     tools,
     toolManager,
     transform.offsetX,
     settings,
     getDimensions,
     addTool,
+    updateTool,
     setActiveTool,
     setSelectedTool,
+    setIsDrawing,
+    updateTempPoints,
   ]);
 
   const handleMouseUp = useCallback(() => {
@@ -673,8 +740,16 @@ export const Chart: React.FC<ChartProps> = ({ width, height }) => {
 
       {/* Help text */}
       {marketData && (
-        <div className="absolute bottom-2 left-2 z-10 text-xs text-gray-500 dark:text-gray-400 bg-white/80 dark:bg-gray-800/80 px-2 py-1 rounded">
-          Scroll: Zoom | Drag: Pan | Double-click: Fit | +/-: Zoom | Home: Reset | A: Auto-scale
+        <div className="absolute bottom-2 left-2 z-10 text-xs text-gray-500 dark:text-gray-400 bg-white/80 dark:bg-gray-800/80 px-2 py-1 rounded max-w-md">
+          {toolInteraction.isDrawing ? (
+            <span className="text-blue-600 dark:text-blue-400 font-semibold">
+              Click to place second point | ESC: Cancel
+            </span>
+          ) : (
+            <>
+              Scroll: Zoom | Drag: Pan | Double-click: Fit | +/-: Zoom | Home: Reset | A: Auto-scale | ESC: Exit tool
+            </>
+          )}
         </div>
       )}
 
