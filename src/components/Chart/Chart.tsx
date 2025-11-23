@@ -11,6 +11,7 @@
 
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { ChartRenderer } from './ChartRenderer';
+import { ToolManager, ToolFactory } from '../Tools';
 import {
   useMarketData,
   useChartSettings,
@@ -18,11 +19,15 @@ import {
   useStore,
   useChartTransform,
   useChartRange,
+  useTools,
+  useActiveTool,
+  useSelectedTool,
 } from '../../stores/useStore';
 import {
   createCoordinateMapper,
 } from '../../utils/chartCalculations';
-import type { ChartDimensions, CanvasPoint } from '../../types';
+import { ToolType } from '../../types';
+import type { ChartDimensions, CanvasPoint, ChartPoint } from '../../types';
 
 interface ChartProps {
   width?: number;
@@ -33,6 +38,7 @@ export const Chart: React.FC<ChartProps> = ({ width, height }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [renderer, setRenderer] = useState<ChartRenderer | null>(null);
+  const [toolManager, setToolManager] = useState<ToolManager | null>(null);
   const [crosshair, setCrosshair] = useState<CanvasPoint | null>(null);
   const [hoveredCandleIndex, setHoveredCandleIndex] = useState<number | null>(null);
 
@@ -44,6 +50,14 @@ export const Chart: React.FC<ChartProps> = ({ width, height }) => {
   const range = useChartRange();
   const updateRange = useStore((state) => state.updateRange);
   const updateTransform = useStore((state) => state.updateTransform);
+
+  // Tool state
+  const tools = useTools();
+  const activeTool = useActiveTool();
+  const selectedTool = useSelectedTool();
+  const addTool = useStore((state) => state.addTool);
+  const setActiveTool = useStore((state) => state.setActiveTool);
+  const setSelectedTool = useStore((state) => state.setSelectedTool);
 
   // Constants for zoom limits
   const MIN_CANDLES_VISIBLE = 10;
@@ -109,12 +123,15 @@ export const Chart: React.FC<ChartProps> = ({ width, height }) => {
     // Scale for high DPI displays
     ctx.scale(dpr, dpr);
 
-    // Create renderer
+    // Create renderer and tool manager
     const chartRenderer = new ChartRenderer(ctx, theme);
+    const toolMgr = new ToolManager(ctx);
     setRenderer(chartRenderer);
+    setToolManager(toolMgr);
 
     return () => {
       setRenderer(null);
+      setToolManager(null);
     };
   }, [theme]);
 
@@ -246,6 +263,11 @@ export const Chart: React.FC<ChartProps> = ({ width, height }) => {
       marketData.timeframe
     );
 
+    // Draw tools
+    if (toolManager && tools.length > 0) {
+      toolManager.renderTools(tools, mapper, selectedTool || null);
+    }
+
     // Draw crosshair
     if (crosshair) {
       renderer.drawCrosshair(
@@ -268,12 +290,15 @@ export const Chart: React.FC<ChartProps> = ({ width, height }) => {
     }
   }, [
     renderer,
+    toolManager,
     marketData,
     range,
     settings,
     theme,
     crosshair,
     hoveredCandleIndex,
+    tools,
+    selectedTool,
     getDimensions,
   ]);
 
@@ -479,16 +504,84 @@ export const Chart: React.FC<ChartProps> = ({ width, height }) => {
 
   const handleMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    if (!canvas || !marketData || !range) return;
 
     const rect = canvas.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
 
+    const dimensions = getDimensions();
+    const mapper = createCoordinateMapper(
+      marketData.candles,
+      dimensions,
+      range,
+      settings
+    );
+
+    // Handle tool interactions
+    if (activeTool !== ToolType.NONE && activeTool !== ToolType.CURSOR) {
+      // Place a new tool
+      const price = mapper.yToPrice(y);
+      const timestamp = mapper.xToTime(x);
+      const chartPoint: ChartPoint = { price, timestamp };
+
+      // Create tool based on active tool type
+      let newTool;
+      if (activeTool === ToolType.GANN_ANGLES) {
+        // Calculate price scale for Gann angles
+        const priceRange = range.priceRange.max - range.priceRange.min;
+        const priceScale = priceRange / dimensions.priceChartHeight;
+        newTool = ToolFactory.createGannAngles(chartPoint, 'up', priceScale);
+      } else if (activeTool === ToolType.TRENDLINE) {
+        newTool = ToolFactory.createTrendLine(chartPoint, chartPoint);
+      } else if (activeTool === ToolType.HORIZONTAL_LINE) {
+        newTool = ToolFactory.createHorizontalLine(price, timestamp);
+      } else if (activeTool === ToolType.VERTICAL_LINE) {
+        newTool = ToolFactory.createVerticalLine(timestamp, price);
+      }
+
+      if (newTool) {
+        addTool(newTool);
+        setSelectedTool(newTool.id);
+        // Reset to cursor after placing tool
+        setActiveTool(ToolType.CURSOR);
+      }
+      return;
+    }
+
+    // Handle tool selection with cursor
+    if (activeTool === ToolType.CURSOR && toolManager) {
+      const clickedTool = toolManager.findToolAtPoint(
+        tools,
+        { x, y },
+        mapper
+      );
+
+      if (clickedTool) {
+        setSelectedTool(clickedTool.id);
+        return; // Don't start dragging if we clicked a tool
+      } else {
+        setSelectedTool(null); // Deselect if clicking empty space
+      }
+    }
+
+    // Start pan dragging
     setIsDragging(true);
     setDragStart({ x, y });
     setDragOffset(transform.offsetX);
-  }, [transform.offsetX]);
+  }, [
+    marketData,
+    range,
+    activeTool,
+    tools,
+    toolManager,
+    transform.offsetX,
+    settings,
+    getDimensions,
+    addTool,
+    setActiveTool,
+    setSelectedTool,
+  ]);
 
   const handleMouseUp = useCallback(() => {
     setIsDragging(false);
@@ -587,7 +680,13 @@ export const Chart: React.FC<ChartProps> = ({ width, height }) => {
 
       <canvas
         ref={canvasRef}
-        className={`chart-canvas w-full h-full ${isDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
+        className={`chart-canvas w-full h-full ${
+          isDragging
+            ? 'cursor-grabbing'
+            : activeTool !== ToolType.NONE && activeTool !== ToolType.CURSOR
+            ? 'cursor-crosshair'
+            : 'cursor-grab'
+        }`}
         onMouseMove={handleMouseMoveWhileDragging}
         onMouseLeave={handleMouseLeave}
         onMouseDown={handleMouseDown}
