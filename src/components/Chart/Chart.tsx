@@ -1,6 +1,12 @@
 /**
  * Chart Component - Main charting component
  * Manages canvas rendering, user interactions, and state
+ *
+ * TradingView-style interactions:
+ * - Mouse wheel: Zoom in/out (centered on cursor)
+ * - Click & drag: Pan chart
+ * - Double-click: Auto-scale/fit view
+ * - Keyboard: +/- for zoom, Home for reset, A for auto-scale
  */
 
 import React, { useRef, useEffect, useState, useCallback } from 'react';
@@ -14,7 +20,6 @@ import {
   useChartRange,
 } from '../../stores/useStore';
 import {
-  calculateChartRange,
   createCoordinateMapper,
 } from '../../utils/chartCalculations';
 import type { ChartDimensions, CanvasPoint } from '../../types';
@@ -39,6 +44,11 @@ export const Chart: React.FC<ChartProps> = ({ width, height }) => {
   const range = useChartRange();
   const updateRange = useStore((state) => state.updateRange);
   const updateTransform = useStore((state) => state.updateTransform);
+
+  // Constants for zoom limits
+  const MIN_CANDLES_VISIBLE = 10;
+  const MAX_CANDLES_VISIBLE = 500;
+  const DEFAULT_CANDLES_VISIBLE = 100;
 
   // Calculate dimensions
   const getDimensions = useCallback((): ChartDimensions => {
@@ -109,20 +119,75 @@ export const Chart: React.FC<ChartProps> = ({ width, height }) => {
   }, [theme]);
 
   /**
-   * Update chart range when data or transform changes
+   * Initialize default transform when data loads
    */
   useEffect(() => {
     if (!marketData || !marketData.candles.length) return;
 
-    const dimensions = getDimensions();
-    const newRange = calculateChartRange(
-      marketData.candles,
-      transform,
-      dimensions,
-      settings
-    );
+    // Set initial view to show last 100 candles
+    if (transform.candlesVisible === 0) {
+      const initialOffset = 0; // Start at the end (most recent data)
+      updateTransform({
+        candlesVisible: DEFAULT_CANDLES_VISIBLE,
+        offsetX: initialOffset,
+        scale: 1.0,
+      });
+    }
+  }, [marketData, transform.candlesVisible, updateTransform]);
+
+  /**
+   * Update chart range when data or transform changes
+   */
+  useEffect(() => {
+    if (!marketData || !marketData.candles.length) return;
+    if (transform.candlesVisible === 0) return;
+
+    // Calculate visible range based on candlesVisible and offsetX
+    const totalCandles = marketData.candles.length;
+    const visibleCandles = Math.min(transform.candlesVisible, totalCandles);
+
+    // offsetX represents how many candles we're panned from the right edge
+    const rightOffset = Math.floor(transform.offsetX);
+    const endIndex = Math.max(0, Math.min(totalCandles - 1, totalCandles - 1 - rightOffset));
+    const startIndex = Math.max(0, endIndex - visibleCandles + 1);
+
+    const newRange = {
+      startIndex,
+      endIndex,
+      timeRange: {
+        start: marketData.candles[startIndex]?.timestamp || 0,
+        end: marketData.candles[endIndex]?.timestamp || 0,
+      },
+      priceRange: calculatePriceRange(marketData.candles, startIndex, endIndex),
+    };
+
     updateRange(newRange);
-  }, [marketData, transform, settings, getDimensions, updateRange]);
+  }, [marketData, transform, updateRange]);
+
+  /**
+   * Calculate price range helper
+   */
+  const calculatePriceRange = (candles: any[], start: number, end: number) => {
+    if (!candles || candles.length === 0) {
+      return { min: 0, max: 100 };
+    }
+
+    let min = Infinity;
+    let max = -Infinity;
+
+    for (let i = start; i <= end && i < candles.length; i++) {
+      const candle = candles[i];
+      min = Math.min(min, candle.low);
+      max = Math.max(max, candle.high);
+    }
+
+    // Add 5% padding
+    const padding = (max - min) * 0.05;
+    return {
+      min: min - padding,
+      max: max + padding,
+    };
+  };
 
   /**
    * Main render function
@@ -267,9 +332,77 @@ export const Chart: React.FC<ChartProps> = ({ width, height }) => {
   }, []);
 
   /**
-   * Handle mouse wheel (zoom)
+   * Zoom function - TradingView style
+   * Zooms centered on the mouse position
    */
+  const zoom = useCallback(
+    (delta: number, mouseX?: number) => {
+      if (!marketData || !range) return;
 
+      const zoomFactor = 1.1;
+      const zoomMultiplier = delta > 0 ? 1 / zoomFactor : zoomFactor;
+
+      // Calculate new number of visible candles
+      const currentVisible = transform.candlesVisible;
+      const newVisible = Math.round(currentVisible * zoomMultiplier);
+
+      // Clamp to limits
+      const clampedVisible = Math.max(
+        MIN_CANDLES_VISIBLE,
+        Math.min(MAX_CANDLES_VISIBLE, newVisible)
+      );
+
+      if (clampedVisible === currentVisible) return;
+
+      // Calculate zoom point (0 = left edge, 1 = right edge)
+      let zoomPoint = 0.8; // Default: zoom near right edge (recent data)
+
+      if (mouseX !== undefined) {
+        const dimensions = getDimensions();
+        zoomPoint = Math.max(0, Math.min(1, mouseX / dimensions.chartWidth));
+      }
+
+      // Calculate how many candles to shift the offset to keep zoom centered
+      const candlesDiff = clampedVisible - currentVisible;
+      const offsetAdjustment = candlesDiff * (1 - zoomPoint);
+
+      // Update transform
+      const newOffsetX = Math.max(0, transform.offsetX + offsetAdjustment);
+
+      updateTransform({
+        candlesVisible: clampedVisible,
+        offsetX: newOffsetX,
+      });
+    },
+    [marketData, range, transform, getDimensions, updateTransform]
+  );
+
+  /**
+   * Auto-scale / Fit view - shows all available data
+   */
+  const autoScale = useCallback(() => {
+    if (!marketData || !marketData.candles.length) return;
+
+    const totalCandles = marketData.candles.length;
+    const visibleCandles = Math.min(totalCandles, DEFAULT_CANDLES_VISIBLE);
+
+    updateTransform({
+      candlesVisible: visibleCandles,
+      offsetX: 0, // Show most recent data
+      scale: 1.0,
+    });
+  }, [marketData, updateTransform]);
+
+  /**
+   * Reset view - back to default
+   */
+  const resetView = useCallback(() => {
+    updateTransform({
+      candlesVisible: DEFAULT_CANDLES_VISIBLE,
+      offsetX: 0,
+      scale: 1.0,
+    });
+  }, [updateTransform]);
 
   /**
    * Attach wheel listener manually to support non-passive events
@@ -280,12 +413,11 @@ export const Chart: React.FC<ChartProps> = ({ width, height }) => {
 
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
-      const zoomFactor = 1.1;
-      const delta = e.deltaY > 0 ? 1 / zoomFactor : zoomFactor;
 
-      updateTransform({
-        scale: transform.scale * delta,
-      });
+      const rect = canvas.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+
+      zoom(e.deltaY, mouseX);
     };
 
     canvas.addEventListener('wheel', onWheel, { passive: false });
@@ -293,13 +425,57 @@ export const Chart: React.FC<ChartProps> = ({ width, height }) => {
     return () => {
       canvas.removeEventListener('wheel', onWheel);
     };
-  }, [transform, updateTransform]);
+  }, [zoom]);
+
+  /**
+   * Keyboard shortcuts
+   */
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Only handle if chart is focused or no input is focused
+      if (
+        document.activeElement?.tagName === 'INPUT' ||
+        document.activeElement?.tagName === 'TEXTAREA'
+      ) {
+        return;
+      }
+
+      switch (e.key) {
+        case '+':
+        case '=':
+          e.preventDefault();
+          zoom(-1); // Zoom in
+          break;
+        case '-':
+        case '_':
+          e.preventDefault();
+          zoom(1); // Zoom out
+          break;
+        case 'Home':
+          e.preventDefault();
+          resetView();
+          break;
+        case 'a':
+        case 'A':
+          e.preventDefault();
+          autoScale();
+          break;
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [zoom, resetView, autoScale]);
 
   /**
    * Handle mouse drag (pan)
    */
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState<CanvasPoint | null>(null);
+  const [dragOffset, setDragOffset] = useState<number>(0);
 
   const handleMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
@@ -311,7 +487,8 @@ export const Chart: React.FC<ChartProps> = ({ width, height }) => {
 
     setIsDragging(true);
     setDragStart({ x, y });
-  }, []);
+    setDragOffset(transform.offsetX);
+  }, [transform.offsetX]);
 
   const handleMouseUp = useCallback(() => {
     setIsDragging(false);
@@ -322,7 +499,7 @@ export const Chart: React.FC<ChartProps> = ({ width, height }) => {
     (e: React.MouseEvent<HTMLCanvasElement>) => {
       handleMouseMove(e);
 
-      if (!isDragging || !dragStart) return;
+      if (!isDragging || !dragStart || !marketData) return;
 
       const canvas = canvasRef.current;
       if (!canvas) return;
@@ -330,29 +507,92 @@ export const Chart: React.FC<ChartProps> = ({ width, height }) => {
       const rect = canvas.getBoundingClientRect();
       const x = e.clientX - rect.left;
 
-      const deltaX = x - dragStart.x;
+      // Calculate how many candles were dragged
+      const candleWidth = settings.candleWidth + settings.candleSpacing;
+      const pixelsDragged = dragStart.x - x; // Reversed: drag right = pan left
+      const candlesDragged = pixelsDragged / candleWidth;
+
+      // Update offset with bounds checking
+      const totalCandles = marketData.candles.length;
+      const maxOffset = Math.max(0, totalCandles - transform.candlesVisible);
+      const newOffsetX = Math.max(0, Math.min(maxOffset, dragOffset + candlesDragged));
 
       updateTransform({
-        offsetX: Math.max(0, transform.offsetX - deltaX),
+        offsetX: newOffsetX,
       });
-
-      setDragStart({ x, y: dragStart.y });
     },
-    [isDragging, dragStart, transform, updateTransform, handleMouseMove]
+    [isDragging, dragStart, dragOffset, marketData, transform.candlesVisible, settings, getDimensions, handleMouseMove, updateTransform]
   );
+
+  /**
+   * Double-click to auto-scale
+   */
+  const handleDoubleClick = useCallback(() => {
+    autoScale();
+  }, [autoScale]);
 
   return (
     <div
       ref={containerRef}
       className="relative w-full h-full bg-white dark:bg-gray-900"
     >
+      {/* Chart Controls */}
+      {marketData && (
+        <div className="absolute top-2 right-2 z-10 flex gap-1 bg-white dark:bg-gray-800 rounded shadow-md border border-gray-200 dark:border-gray-700 p-1">
+          <button
+            onClick={() => zoom(-1)}
+            className="px-2 py-1 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors"
+            title="Zoom In (+)"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v6m3-3H7" />
+            </svg>
+          </button>
+          <button
+            onClick={() => zoom(1)}
+            className="px-2 py-1 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors"
+            title="Zoom Out (-)"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM13 10H7" />
+            </svg>
+          </button>
+          <button
+            onClick={autoScale}
+            className="px-2 py-1 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors"
+            title="Auto Scale (A)"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+            </svg>
+          </button>
+          <button
+            onClick={resetView}
+            className="px-2 py-1 text-xs hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors"
+            title="Reset View (Home)"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+            </svg>
+          </button>
+        </div>
+      )}
+
+      {/* Help text */}
+      {marketData && (
+        <div className="absolute bottom-2 left-2 z-10 text-xs text-gray-500 dark:text-gray-400 bg-white/80 dark:bg-gray-800/80 px-2 py-1 rounded">
+          Scroll: Zoom | Drag: Pan | Double-click: Fit | +/-: Zoom | Home: Reset | A: Auto-scale
+        </div>
+      )}
+
       <canvas
         ref={canvasRef}
-        className="chart-canvas w-full h-full"
+        className={`chart-canvas w-full h-full ${isDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
         onMouseMove={handleMouseMoveWhileDragging}
         onMouseLeave={handleMouseLeave}
         onMouseDown={handleMouseDown}
         onMouseUp={handleMouseUp}
+        onDoubleClick={handleDoubleClick}
       />
       {!marketData && (
         <div className="absolute inset-0 flex items-center justify-center text-gray-500 dark:text-gray-400">
